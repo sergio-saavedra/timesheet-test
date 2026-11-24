@@ -1,0 +1,190 @@
+{
+  "entities": {
+    "BootstrapConfig": {
+      "title": "BootstrapConfig",
+      "description": "Single lock document confirming the initial system Administrator has been configured.",
+      "type": "object",
+      "properties": {
+        "adminEmail": {
+          "type": "string",
+          "description": "Normalized email of the initial system Administrator.",
+          "minLength": 5,
+          "maxLength": 120,
+          "pattern": "^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$"
+        },
+        "initializedByUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who initialized the system.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the database was bootstrapped."
+        }
+      },
+      "required": ["adminEmail", "initializedByUid", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered user profile and role assignment managed by Administrators.",
+      "type": "object",
+      "properties": {
+        "firstName": {
+          "type": "string",
+          "description": "User first name (letters and spaces only).",
+          "minLength": 1,
+          "maxLength": 60,
+          "pattern": "^[A-Za-zÀ-ÿ '\\-]+$"
+        },
+        "lastName": {
+          "type": "string",
+          "description": "User last name (letters and spaces only).",
+          "minLength": 1,
+          "maxLength": 60,
+          "pattern": "^[A-Za-zÀ-ÿ '\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "description": "Normalized lowercase user email address.",
+          "minLength": 5,
+          "maxLength": 120,
+          "pattern": "^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Employee", "Manager", "Administrator"],
+          "description": "Assigned application role."
+        },
+        "managerEmail": {
+          "type": "string",
+          "description": "Normalized email of the assigned Manager (empty if none).",
+          "maxLength": 120
+        },
+        "managerName": {
+          "type": "string",
+          "description": "Full name of the assigned Manager (empty if none).",
+          "maxLength": 125
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the user was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the user was last updated."
+        }
+      },
+      "required": [
+        "firstName",
+        "lastName",
+        "email",
+        "role",
+        "managerEmail",
+        "managerName",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TimeEntry": {
+      "title": "TimeEntry",
+      "description": "Logged work hours entry submitted by an Employee and reviewed by their Manager.",
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Work date in MM/DD/YYYY format.",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^(0[1-9]|1[0-2])\\/(0[1-9]|[12][0-9]|3[01])\\/20[0-9]{2}$"
+        },
+        "description": {
+          "type": "string",
+          "description": "Summary of the work completed.",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "hours": {
+          "type": "number",
+          "description": "Decimal hours worked (minimum 0.5, maximum 24.0, 1 decimal place)."
+        },
+        "managerEmail": {
+          "type": "string",
+          "description": "Normalized email of the Manager reviewing this entry.",
+          "minLength": 5,
+          "maxLength": 120,
+          "pattern": "^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$"
+        },
+        "managerName": {
+          "type": "string",
+          "description": "Full name of the reviewing Manager.",
+          "minLength": 1,
+          "maxLength": 125
+        },
+        "employeeEmail": {
+          "type": "string",
+          "description": "Normalized email of the Employee who owns the entry.",
+          "minLength": 5,
+          "maxLength": 120,
+          "pattern": "^[a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,}$"
+        },
+        "employeeName": {
+          "type": "string",
+          "description": "Full name of the Employee who owns the entry.",
+          "minLength": 1,
+          "maxLength": 125
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Pending", "Approved", "Attention Needed", "Rejected"],
+          "description": "Current review status."
+        },
+        "comments": {
+          "type": "string",
+          "description": "Manager feedback or adjustment request comments.",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the entry was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the entry was last modified."
+        }
+      },
+      "required": [
+        "date",
+        "description",
+        "hours",
+        "managerEmail",
+        "managerName",
+        "employeeEmail",
+        "employeeName",
+        "status",
+        "comments",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/system/bootstrap": {
+      "schema": { "$ref": "#/entities/BootstrapConfig" },
+      "description": "Singleton bootstrap lock document indicating initial Administrator creation."
+    },
+    "/usersByEmail/{userEmail}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Directory of authorized users keyed by normalized lowercase email."
+    },
+    "/timeEntries/{entryId}": {
+      "schema": { "$ref": "#/entities/TimeEntry" },
+      "description": "Employee time entries linked to their assigned Manager for review."
+    }
+  }
+}

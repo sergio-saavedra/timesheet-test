@@ -1,0 +1,268 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    function currentUserEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidEmail(email) {
+      return email is string
+        && email.size() >= 5
+        && email.size() <= 120
+        && email.matches('^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$');
+    }
+
+    function isValidNameText(val) {
+      return val is string
+        && val.size() >= 1
+        && val.size() <= 60
+        && val.matches("^[A-Za-zÀ-ÿ '-]+$");
+    }
+
+    function isValidDateMMDDYYYY(val) {
+      return val is string
+        && val.size() == 10
+        && val.matches('^(0[1-9]|1[0-2])/(0[1-9]|[12][0-9]|3[01])/20[0-9]{2}$');
+    }
+
+    function userDocPath(email) {
+      return /databases/$(database)/documents/usersByEmail/$(email);
+    }
+
+    function bootstrapDocPath() {
+      return /databases/$(database)/documents/system/bootstrap;
+    }
+
+    function isRegisteredUser() {
+      return isEmailVerified() && exists(userDocPath(currentUserEmail()));
+    }
+
+    function getCurrentUserRole() {
+      return get(userDocPath(currentUserEmail())).data.role;
+    }
+
+    function isAdmin() {
+      return isRegisteredUser() && getCurrentUserRole() == 'Administrator';
+    }
+
+    function isManagerRole() {
+      return isRegisteredUser() && getCurrentUserRole() in ['Manager', 'Administrator'];
+    }
+
+    // --- Validation Blueprints ---
+    function isValidBootstrap(data) {
+      return data.keys().hasAll(['adminEmail', 'initializedByUid', 'createdAt'])
+        && data.keys().hasOnly(['adminEmail', 'initializedByUid', 'createdAt'])
+        && isValidEmail(data.adminEmail)
+        && data.initializedByUid is string
+        && data.initializedByUid == request.auth.uid
+        && data.initializedByUid.size() <= 128
+        && data.createdAt == request.time;
+    }
+
+    function isValidUserProfile(data, emailKey) {
+      return data.keys().hasAll(['firstName', 'lastName', 'email', 'role', 'managerEmail', 'managerName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['firstName', 'lastName', 'email', 'role', 'managerEmail', 'managerName', 'createdAt', 'updatedAt'])
+        && isValidNameText(data.firstName)
+        && isValidNameText(data.lastName)
+        && isValidEmail(data.email)
+        && data.email == emailKey
+        && data.role in ['Employee', 'Manager', 'Administrator']
+        && data.managerEmail is string
+        && data.managerEmail.size() <= 120
+        && (data.managerEmail == '' || isValidEmail(data.managerEmail))
+        && data.managerName is string
+        && data.managerName.size() <= 125
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTimeEntry(data) {
+      return data.keys().hasAll([
+          'date', 'description', 'hours', 'managerEmail', 'managerName',
+          'employeeEmail', 'employeeName', 'status', 'comments', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'date', 'description', 'hours', 'managerEmail', 'managerName',
+          'employeeEmail', 'employeeName', 'status', 'comments', 'createdAt', 'updatedAt'
+        ])
+        && isValidDateMMDDYYYY(data.date)
+        && data.description is string
+        && data.description.size() >= 1
+        && data.description.size() <= 500
+        && data.hours is number
+        && data.hours >= 0.5
+        && data.hours <= 24.0
+        && isValidEmail(data.managerEmail)
+        && data.managerName is string
+        && data.managerName.size() >= 1
+        && data.managerName.size() <= 125
+        && isValidEmail(data.employeeEmail)
+        && data.employeeName is string
+        && data.employeeName.size() >= 1
+        && data.employeeName.size() <= 125
+        && data.status in ['Pending', 'Approved', 'Attention Needed', 'Rejected']
+        && data.comments is string
+        && data.comments.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection: /system/bootstrap ---
+    match /system/bootstrap {
+      allow get: if isEmailVerified();
+      allow create: if isEmailVerified()
+        && isValidBootstrap(incoming())
+        && !exists(bootstrapDocPath())
+        && existsAfter(userDocPath(incoming().adminEmail));
+      allow update, delete: if false;
+    }
+
+    // --- Collection: /usersByEmail/{userEmail} ---
+    match /usersByEmail/{userEmail} {
+      allow get: if isEmailVerified()
+        && isValidEmail(userEmail)
+        && (userEmail == currentUserEmail() || isAdmin());
+
+      allow list: if isEmailVerified()
+        && (
+          resource.data.email == currentUserEmail()
+          || resource.data.managerEmail == currentUserEmail()
+          || (isRegisteredUser() && resource.data.role in ['Manager', 'Administrator'])
+          || isAdmin()
+        );
+
+      allow create: if isEmailVerified()
+        && isValidEmail(userEmail)
+        && isValidUserProfile(incoming(), userEmail)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          (
+            !exists(bootstrapDocPath())
+            && incoming().role == 'Administrator'
+            && existsAfter(bootstrapDocPath())
+            && getAfter(bootstrapDocPath()).data.adminEmail == userEmail
+          )
+          || isAdmin()
+        );
+
+      allow update: if isEmailVerified()
+        && isValidEmail(userEmail)
+        && isValidUserProfile(incoming(), userEmail)
+        && isAdmin()
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'firstName', 'lastName', 'role', 'managerEmail', 'managerName', 'updatedAt'
+        ]);
+
+      allow delete: if isEmailVerified()
+        && isValidEmail(userEmail)
+        && isAdmin()
+        && userEmail != currentUserEmail();
+    }
+
+    // --- Collection: /timeEntries/{entryId} ---
+    match /timeEntries/{entryId} {
+      allow get: if isEmailVerified()
+        && isValidId(entryId)
+        && (
+          existing().employeeEmail == currentUserEmail()
+          || existing().managerEmail == currentUserEmail()
+          || isAdmin()
+        );
+
+      allow list: if isEmailVerified()
+        && (
+          resource.data.employeeEmail == currentUserEmail()
+          || resource.data.managerEmail == currentUserEmail()
+        );
+
+      allow create: if isEmailVerified()
+        && isValidId(entryId)
+        && isValidTimeEntry(incoming())
+        && isRegisteredUser()
+        && incoming().employeeEmail == currentUserEmail()
+        && incoming().status == 'Pending'
+        && incoming().comments == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(userDocPath(incoming().managerEmail))
+        && get(userDocPath(incoming().managerEmail)).data.role in ['Manager', 'Administrator'];
+
+      allow update: if isEmailVerified()
+        && isValidId(entryId)
+        && isValidTimeEntry(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().employeeEmail == existing().employeeEmail
+        && incoming().employeeName == existing().employeeName
+        && (
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'date', 'description', 'hours', 'managerEmail', 'managerName', 'status', 'comments', 'updatedAt'
+            ])
+          )
+          || (
+            existing().status in ['Pending', 'Attention Needed']
+            && existing().employeeEmail == currentUserEmail()
+            && incoming().status == 'Pending'
+            && incoming().comments == existing().comments
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'date', 'description', 'hours', 'managerEmail', 'managerName', 'status', 'updatedAt'
+            ])
+            && exists(userDocPath(incoming().managerEmail))
+            && get(userDocPath(incoming().managerEmail)).data.role in ['Manager', 'Administrator']
+          )
+          || (
+            existing().status in ['Pending', 'Attention Needed']
+            && existing().managerEmail == currentUserEmail()
+            && isManagerRole()
+            && incoming().status in ['Approved', 'Attention Needed', 'Rejected']
+            && (incoming().status == 'Approved' || incoming().comments.size() >= 1)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'comments', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isEmailVerified()
+        && isValidId(entryId)
+        && (
+          (existing().employeeEmail == currentUserEmail() && existing().status == 'Pending')
+          || isAdmin()
+        );
+    }
+  }
+}

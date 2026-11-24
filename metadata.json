@@ -1,0 +1,6 @@
+{
+  "name": "TimeLedger",
+  "description": "Employee time tracking and manager review workspace with role-based access for Employees, Managers, and Administrators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
